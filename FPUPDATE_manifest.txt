@@ -1,0 +1,131 @@
+{
+  "filename": "FPUPDATE.DAT",
+  "size": 163630698,
+  "chunk_size": 8388608,
+  "chunk_count": 20,
+  "sha256_original": "72d20d9c1c5a2a18d7e5c1ace7916460cebbfe082b4c46551ffd574ec029040b",
+  "created_utc": "2026-08-28T07:34:43.381912Z",
+  "note": "확장자는 .txt이지만 내용은 순수 바이너리입니다. 복원 시 바이트 그대로 순서대로 이어붙이세요.",
+  "chunks": [
+    {
+      "index": 1,
+      "name": "FPUPDATE_part001.txt",
+      "size": 8388608,
+      "sha256": "60851a034c2fd9dd27435b9b8d172df6528165ca2982315789982fab169339e7"
+    },
+    {
+      "index": 2,
+      "name": "FPUPDATE_part002.txt",
+      "size": 8388608,
+      "sha256": "d07f751d440ed737877d0bdbdf88bc31feb7fde0ea2f8418f6a7085bb46f2813"
+    },
+    {
+      "index": 3,
+      "name": "FPUPDATE_part003.txt",
+      "size": 8388608,
+      "sha256": "2ea58c41ff8c7c7f802347e28fd50a1bf6228c59a8113aabca2ef5c7101df7df"
+    },
+    {
+      "index": 4,
+      "name": "FPUPDATE_part004.txt",
+      "size": 8388608,
+      "sha256": "04be89967fc8d1646c446ab04221b72d5cde69f0b7abb05834724eec8a4a03b9"
+    },
+    {
+      "index": 5,
+      "name": "FPUPDATE_part005.txt",
+      "size": 8388608,
+      "sha256": "263b019129b71b2fa277e7e7d98e6a5f26e2295a2ff0eb03873d412e081fdd0f"
+    },
+    {
+      "index": 6,
+      "name": "FPUPDATE_part006.txt",
+      "size": 8388608,
+      "sha256": "9159e888c77079d5720d7c4ba45bf01ba49d331a8d750be4d36b4f4728a507be"
+    },
+    {
+      "index": 7,
+      "name": "FPUPDATE_part007.txt",
+      "size": 8388608,
+      "sha256": "6a9d602049e4a28e5f593e3e4f78889dce411e4464fbaf015fba4e6dcc020527"
+    },
+    {
+      "index": 8,
+      "name": "FPUPDATE_part008.txt",
+      "size": 8388608,
+      "sha256": "ee38bc828d169b83507f5e2e506e48872464472f1a88185e4915f989aa258842"
+    },
+    {
+      "index": 9,
+      "name": "FPUPDATE_part009.txt",
+      "size": 8388608,
+      "sha256": "964ec21eb24a7d1b17a4bf6f77db6b096ebf28271e630e7f0e2402f7a3502d49"
+    },
+    {
+      "index": 10,
+      "name": "FPUPDATE_part010.txt",
+      "size": 8388608,
+      "sha256": "8cc141e36824244f111c746914765a5533cf8084876fd441d41a1117a5bd34e0"
+    },
+    {
+      "index": 11,
+      "name": "FPUPDATE_part011.txt",
+      "size": 8388608,
+      "sha256": "2519ad93df0696fa37f2bc6db22a8c315c60d4d5a0afb842af3d3a3b3424c524"
+    },
+    {
+      "index": 12,
+      "name": "FPUPDATE_part012.txt",
+      "size": 8388608,
+      "sha256": "97ae6fd6668e6c3b01e21babd3c83d78e331393ebf342d20750add355c768d7f"
+    },
+    {
+      "index": 13,
+      "name": "FPUPDATE_part013.txt",
+      "size": 8388608,
+      "sha256": "f5840e971a75534b4d8124919b6ed2c6567cdfb3cc16728fdd25ed9eb0753499"
+    },
+    {
+      "index": 14,
+      "name": "FPUPDATE_part014.txt",
+      "size": 8388608,
+      "sha256": "9f9b02f5ee6cbef5e018c1ee424095fc21a842ea6968c0d36114b5930dab2ba1"
+    },
+    {
+      "index": 15,
+      "name": "FPUPDATE_part015.txt",
+      "size": 8388608,
+      "sha256": "9f9b02f5ee6cbef5e018c1ee424095fc21a842ea6968c0d36114b5930dab2ba1"
+    },
+    {
+      "index": 16,
+      "name": "FPUPDATE_part016.txt",
+      "size": 8388608,
+      "sha256": "de97ed18b103c7c69a57396f47a77d60d224db534779e58f293b08212d5f7b69"
+    },
+    {
+      "index": 17,
+      "name": "FPUPDATE_part017.txt",
+      "size": 8388608,
+      "sha256": "67e7b62db672c7a743d1dfc526369ca7241613361c255f61a2771101e5d7cc55"
+    },
+    {
+      "index": 18,
+      "name": "FPUPDATE_part018.txt",
+      "size": 8388608,
+      "sha256": "92dab09caa7b097a358b0ba09da74095cd408fdd9a53326f42e4efdbfd3654a5"
+    },
+    {
+      "index": 19,
+      "name": "FPUPDATE_part019.txt",
+      "size": 8388608,
+      "sha256": "9bdea44bd008380c1f9a3122a49692ef1628fa0777cfcb727f757cc7ffedaaa2"
+    },
+    {
+      "index": 20,
+      "name": "FPUPDATE_part020.txt",
+      "size": 4247146,
+      "sha256": "5bb98f2bf6f5483c11276b08058f014e629c492f1b596f9c02c5899d1f697b7a"
+    }
+  ]
+}
