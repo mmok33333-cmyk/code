@@ -1,30 +1,26 @@
 // ==UserScript==
-// @name         iPhone 변경 감지 · 예약 새로고침 · 더블 터치
+// @name         iPhone 변경 감지 · 예약 새로고침 · 더블 터치 · 페이지 이동 유지
 // @namespace    iphone-reload-double-touch
-// @version      5.0.0
-// @description  포인트/범위 변경 감지 또는 예약 시간에 새로고침 후 더블 터치
+// @version      6.1.0
+// @description  모든 웹페이지에서 상태와 버튼을 유지하며 변경 감지 또는 예약 새로고침 후 더블 터치
 // @match        http://*/*
 // @match        https://*/*
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @noframes
 // ==/UserScript==
 
 (async () => {
   "use strict";
 
-  // =========================================================
-  // 기본 설정
-  // =========================================================
-
   const START_URL = "https://www.naver.com/";
 
-  const STORE_KEY = "__iphone_reload_watcher_state_v5";
-  const FIRST_START_KEY = "__iphone_reload_watcher_started_v5";
+  const STORE_KEY = "__iphone_reload_watcher_state_v6";
+  const FIRST_START_KEY = "__iphone_reload_watcher_started_v6";
 
-  const PANEL_ID = "__iphone_reload_watcher_panel";
-  const CONTROLS_ID = "__iphone_reload_watcher_controls";
-  const REGION_ID = "__iphone_reload_watcher_region";
+  const HOST_ID = "__iphone_reload_watcher_host_v6";
+  const OUTLINE_ATTR = "data-iphone-reload-outline-v6";
 
   const LONG_PRESS_TIME = 700;
   const DRAG_DISTANCE = 15;
@@ -34,23 +30,13 @@
 
   const DOUBLE_TOUCH_INTERVAL = 130;
   const POST_RELOAD_DELAY = 700;
-
-  /*
-   * 일부 웹사이트는 로드 직후 내용이 계속 바뀌므로
-   * 시작 후 잠시 기준 화면을 안정화합니다.
-   */
   const INITIAL_STABILIZE_TIME = 1200;
 
-  if (window.__iphoneReloadWatcherInstalled) {
+  if (window.__iphoneReloadWatcherInstalledV6) {
     return;
   }
 
-  window.__iphoneReloadWatcherInstalled = true;
-
-
-  // =========================================================
-  // 저장소
-  // =========================================================
+  window.__iphoneReloadWatcherInstalledV6 = true;
 
   function storageGet(key, defaultValue) {
     try {
@@ -85,33 +71,19 @@
     }
 
     try {
-      localStorage.setItem(
-        key,
-        JSON.stringify(value)
-      );
+      localStorage.setItem(key, JSON.stringify(value));
     } catch (error) {
       console.warn("localStorage 저장 실패:", error);
     }
   }
 
-
-  // =========================================================
-  // 최초 화면을 네이버로 이동
-  // =========================================================
-
-  const firstStarted = storageGet(
-    FIRST_START_KEY,
-    false
-  );
+  const firstStarted = storageGet(FIRST_START_KEY, false);
 
   if (!firstStarted) {
     storageSet(FIRST_START_KEY, true);
 
-    const currentUrl =
-      location.href.replace(/\/+$/, "");
-
-    const startUrl =
-      START_URL.replace(/\/+$/, "");
+    const currentUrl = location.href.replace(/\/+$/, "");
+    const startUrl = START_URL.replace(/\/+$/, "");
 
     if (currentUrl !== startUrl) {
       location.replace(START_URL);
@@ -119,40 +91,23 @@
     }
   }
 
-
-  // =========================================================
-  // 상태
-  // =========================================================
-
   const defaultState = {
     enabled: false,
     paused: false,
 
     mode: null,
 
-    /*
-     * single 모드
-     */
     selector: null,
     point: null,
     signature: null,
 
-    /*
-     * region 모드
-     */
     region: null,
     regionItems: {},
 
-    /*
-     * 예약 시간
-     */
     scheduleTime: "",
     leadSeconds: 0,
     lastScheduleKey: "",
 
-    /*
-     * 예약 새로고침 후 자동 터치 여부
-     */
     pendingTouchAfterReload: false,
     pendingTouchReason: "",
 
@@ -168,28 +123,25 @@
   let actionInProgress = false;
   let lastCheckTime = 0;
   let initializedAt = Date.now();
+  let lastKnownUrl = location.href;
+
+  let host = null;
+  let shadowRoot = null;
+  let panel = null;
+  let controls = null;
+  let regionBox = null;
+  let statusElement = null;
+
+  let lastStatusMessage = "";
 
   function saveState() {
     storageSet(STORE_KEY, state);
   }
 
-  function replaceState(nextState) {
-    state = Object.assign(
-      {},
-      defaultState,
-      nextState || {}
-    );
-
-    saveState();
-  }
-
-
-  // =========================================================
-  // 공통 함수
-  // =========================================================
-
-  function get(id) {
-    return document.getElementById(id);
+  function sleep(milliseconds) {
+    return new Promise(resolve => {
+      setTimeout(resolve, milliseconds);
+    });
   }
 
   function escapeHtml(value) {
@@ -201,26 +153,82 @@
       .replaceAll("'", "&#039;");
   }
 
-  function isOwnElement(element) {
+  function cssEscape(value) {
+    if (
+      window.CSS &&
+      typeof window.CSS.escape === "function"
+    ) {
+      return window.CSS.escape(String(value));
+    }
+
+    return String(value).replace(
+      /[^a-zA-Z0-9_-]/g,
+      character => {
+        return (
+          "\\" +
+          character.codePointAt(0).toString(16) +
+          " "
+        );
+      }
+    );
+  }
+
+  function waitForDocument() {
+    return new Promise(resolve => {
+      if (document.documentElement) {
+        resolve();
+        return;
+      }
+
+      const observer = new MutationObserver(() => {
+        if (document.documentElement) {
+          observer.disconnect();
+          resolve();
+        }
+      });
+
+      observer.observe(document, {
+        childList: true,
+        subtree: true
+      });
+    });
+  }
+
+  await waitForDocument();
+
+  function isOwnElement(element, event = null) {
+    if (event?.composedPath) {
+      const path = event.composedPath();
+
+      if (
+        path.includes(host) ||
+        path.includes(panel) ||
+        path.includes(controls) ||
+        path.includes(regionBox)
+      ) {
+        return true;
+      }
+    }
+
     if (!element) {
       return false;
     }
 
     if (
-      element.id === PANEL_ID ||
-      element.id === CONTROLS_ID ||
-      element.id === REGION_ID
+      element === host ||
+      element === panel ||
+      element === controls ||
+      element === regionBox
     ) {
       return true;
     }
 
-    if (element.closest) {
-      return !!element.closest(
-        `#${PANEL_ID},#${CONTROLS_ID}`
-      );
-    }
+    const root = element.getRootNode?.();
 
-    return false;
+    return !!(
+      shadowRoot &&
+      root === shadowRoot
+    );
   }
 
   function getText(element) {
@@ -246,7 +254,7 @@
       return "";
     }
 
-    const attrs = [
+    const attributes = [
       "data-code",
       "data-id",
       "data-item-code",
@@ -256,11 +264,11 @@
       "id"
     ];
 
-    for (const attr of attrs) {
-      const value = element.getAttribute?.(attr);
+    for (const attribute of attributes) {
+      const value = element.getAttribute?.(attribute);
 
       if (value) {
-        return `${attr}=${value}`;
+        return `${attribute}=${value}`;
       }
     }
 
@@ -292,23 +300,18 @@
     }
   }
 
-
-  // =========================================================
-  // 요소 식별
-  // =========================================================
-
   function makeSelector(element) {
     if (
       !element ||
-      element.nodeType !== Node.ELEMENT_NODE
+      element.nodeType !== Node.ELEMENT_NODE ||
+      isOwnElement(element)
     ) {
       return null;
     }
 
     if (element.id) {
       try {
-        const selector =
-          "#" + CSS.escape(element.id);
+        const selector = "#" + cssEscape(element.id);
 
         if (
           document.querySelectorAll(selector).length === 1
@@ -316,11 +319,11 @@
           return selector;
         }
       } catch (error) {
-        // 다음 방식으로 계속 진행
+        // 다음 방식으로 진행
       }
     }
 
-    const codeAttrs = [
+    const codeAttributes = [
       "data-code",
       "data-id",
       "data-item-code",
@@ -329,17 +332,21 @@
       "name"
     ];
 
-    for (const attr of codeAttrs) {
-      const value = element.getAttribute(attr);
+    for (const attribute of codeAttributes) {
+      const value = element.getAttribute(attribute);
 
       if (!value) {
         continue;
       }
 
       try {
+        const safeValue = String(value)
+          .replaceAll("\\", "\\\\")
+          .replaceAll('"', '\\"');
+
         const selector =
           element.tagName.toLowerCase() +
-          `[${attr}="${CSS.escape(value)}"]`;
+          `[${attribute}="${safeValue}"]`;
 
         if (
           document.querySelectorAll(selector).length === 1
@@ -347,7 +354,7 @@
           return selector;
         }
       } catch (error) {
-        // 다음 속성 확인
+        // 다음 방식으로 진행
       }
     }
 
@@ -359,7 +366,7 @@
       current.nodeType === Node.ELEMENT_NODE &&
       current !== document.body &&
       current !== document.documentElement &&
-      path.length < 10
+      path.length < 12
     ) {
       let part = current.tagName.toLowerCase();
 
@@ -384,10 +391,10 @@
             part +=
               "." +
               classes
-                .map(name => CSS.escape(name))
+                .map(name => cssEscape(name))
                 .join(".");
           } catch (error) {
-            // 클래스는 생략
+            // 클래스 생략
           }
         }
       }
@@ -395,19 +402,16 @@
       const parent = current.parentElement;
 
       if (parent) {
-        const sameTag = [...parent.children]
-          .filter(child => {
-            return (
-              child.tagName === current.tagName
-            );
+        const sameTagElements =
+          [...parent.children].filter(child => {
+            return child.tagName === current.tagName;
           });
 
-        if (sameTag.length > 1) {
+        if (sameTagElements.length > 1) {
           const index =
-            sameTag.indexOf(current);
+            sameTagElements.indexOf(current);
 
-          part +=
-            `:nth-of-type(${index + 1})`;
+          part += `:nth-of-type(${index + 1})`;
         }
       }
 
@@ -434,21 +438,17 @@
     return null;
   }
 
-
-  // =========================================================
-  // 화면 상태 및 클릭 가능 요소
-  // =========================================================
-
   function isVisible(element) {
-    if (!element || isOwnElement(element)) {
+    if (
+      !element ||
+      isOwnElement(element) ||
+      !element.isConnected
+    ) {
       return false;
     }
 
-    const rect =
-      element.getBoundingClientRect();
-
-    const style =
-      getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
 
     return (
       rect.width > 0 &&
@@ -464,7 +464,7 @@
       return false;
     }
 
-    const tag =
+    const tagName =
       element.tagName.toLowerCase();
 
     return (
@@ -477,7 +477,7 @@
         "option",
         "label",
         "summary"
-      ].includes(tag) ||
+      ].includes(tagName) ||
       element.getAttribute("role") === "button" ||
       element.getAttribute("role") === "link" ||
       element.hasAttribute("onclick") ||
@@ -486,7 +486,7 @@
   }
 
   function findClickable(element) {
-    if (!element) {
+    if (!element || isOwnElement(element)) {
       return null;
     }
 
@@ -508,11 +508,8 @@
   }
 
   function getVisualInfo(element) {
-    const style =
-      getComputedStyle(element);
-
-    const rect =
-      element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
 
     return {
       color: style.color,
@@ -533,20 +530,18 @@
       return null;
     }
 
-    /*
-     * 감시 도구가 추가한 outline/style 때문에
-     * 자기 자신을 변화로 오인하지 않도록 style과
-     * watcher 관련 속성은 제외합니다.
-     */
-    const attrs = [...element.attributes]
-      .filter(attr => {
+    const attributes = [...element.attributes]
+      .filter(attribute => {
         return (
-          attr.name !== "style" &&
-          !attr.name.startsWith("data-iphone-reload")
+          attribute.name !== "style" &&
+          attribute.name !== OUTLINE_ATTR &&
+          !attribute.name.startsWith(
+            "data-iphone-reload"
+          )
         );
       })
-      .map(attr => {
-        return `${attr.name}=${attr.value}`;
+      .map(attribute => {
+        return `${attribute.name}=${attribute.value}`;
       })
       .sort()
       .join("|");
@@ -568,130 +563,259 @@
       text: getText(element),
       value: element.value ?? "",
       html,
-      className: String(
-        element.className || ""
-      ),
+      className: String(element.className || ""),
       disabled: !!element.disabled,
       hidden: !!element.hidden,
-      attributes: attrs,
+      attributes,
       visual: getVisualInfo(element)
     });
   }
 
+  function createInterface() {
+    const oldHost =
+      document.getElementById(HOST_ID);
 
-  // =========================================================
-  // 패널
-  // =========================================================
-
-  function createPanel() {
-    let panel = get(PANEL_ID);
-
-    if (panel) {
-      return panel;
+    if (
+      oldHost &&
+      oldHost !== host
+    ) {
+      oldHost.remove();
     }
 
-    panel = document.createElement("div");
-    panel.id = PANEL_ID;
+    host = document.createElement("div");
+    host.id = HOST_ID;
 
-    Object.assign(panel.style, {
+    Object.assign(host.style, {
+      all: "initial",
       position: "fixed",
-      zIndex: "2147483647",
-      left: "8px",
-      right: "8px",
-      bottom: "8px",
-      background: "rgba(0,0,0,.90)",
-      color: "white",
-      padding: "10px",
-      borderRadius: "10px",
-      fontSize: "13px",
-      lineHeight: "1.5",
-      fontFamily: "Arial,sans-serif",
-      boxSizing: "border-box",
-      boxShadow: "0 2px 12px rgba(0,0,0,.4)",
-      WebkitUserSelect: "none",
-      userSelect: "none"
+      left: "0",
+      top: "0",
+      width: "0",
+      height: "0",
+      zIndex: "2147483647"
     });
 
+    shadowRoot = host.attachShadow({
+      mode: "closed"
+    });
+
+    const style = document.createElement("style");
+
+    style.textContent = `
+      * {
+        box-sizing: border-box;
+      }
+
+      #panel {
+        position: fixed;
+        z-index: 2147483647;
+        left: 8px;
+        right: 8px;
+        bottom: max(8px, env(safe-area-inset-bottom));
+        background: rgba(0, 0, 0, 0.92);
+        color: white;
+        padding: 10px;
+        border-radius: 10px;
+        font-size: 13px;
+        line-height: 1.5;
+        font-family: Arial, sans-serif;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: manipulation;
+      }
+
+      #status {
+        margin-bottom: 8px;
+        min-height: 39px;
+        word-break: keep-all;
+      }
+
+      #settings {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      label {
+        color: white;
+        font: inherit;
+      }
+
+      input,
+      button {
+        font-family: Arial, sans-serif;
+      }
+
+      #schedule {
+        width: 112px;
+        height: 30px;
+        font-size: 13px;
+      }
+
+      #lead {
+        width: 58px;
+        height: 29px;
+        font-size: 13px;
+      }
+
+      .small-button {
+        min-height: 30px;
+        padding: 5px 8px;
+        border: 1px solid #aaa;
+        border-radius: 4px;
+        background: #f4f4f4;
+        color: #111;
+        font-size: 12px;
+      }
+
+      #controls {
+        position: fixed;
+        z-index: 2147483647;
+        right: max(8px, env(safe-area-inset-right));
+        top: 42%;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 6px;
+        background: rgba(0, 0, 0, 0.82);
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: manipulation;
+      }
+
+      .control-button {
+        width: 44px;
+        height: 40px;
+        border: 1px solid #aaa;
+        border-radius: 5px;
+        background: #f4f4f4;
+        color: #111;
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      #pause {
+        font-size: 18px;
+      }
+
+      #stop {
+        color: red;
+      }
+
+      #region {
+        position: fixed;
+        z-index: 2147483646;
+        display: none;
+        border: 3px solid #00ff66;
+        background: rgba(0, 255, 100, 0.10);
+        pointer-events: none;
+      }
+    `;
+
+    panel = document.createElement("div");
+    panel.id = "panel";
+
     panel.innerHTML = `
-      <div
-        id="__watcher_status"
-        style="
-          margin-bottom:8px;
-          min-height:39px;
-          word-break:keep-all;
-        "
-      >
+      <div id="status">
         감시할 지점을 0.7초 이상 꾹 누르세요.
       </div>
 
-      <div style="
-        display:flex;
-        gap:5px;
-        align-items:center;
-        flex-wrap:wrap;
-      ">
+      <div id="settings">
         <label>
           시간
           <input
-            id="__watcher_schedule"
+            id="schedule"
             type="time"
             step="1"
-            style="
-              font-size:13px;
-              width:110px;
-              height:29px;
-            "
           >
         </label>
 
         <label>
           <input
-            id="__watcher_lead"
+            id="lead"
             type="number"
             min="0"
             step="0.1"
             inputmode="decimal"
             placeholder="0"
-            style="
-              width:58px;
-              height:27px;
-              font-size:13px;
-            "
           >
           초 전
         </label>
 
         <button
-          id="__watcher_clear_time"
+          id="clear-time"
+          class="small-button"
           type="button"
-          style="
-            font-size:12px;
-            padding:5px 7px;
-          "
         >
           시간 해제
         </button>
 
         <button
-          id="__watcher_reload_now"
+          id="reload-now"
+          class="small-button"
           type="button"
-          style="
-            font-size:12px;
-            padding:5px 7px;
-          "
         >
           새로고침
         </button>
       </div>
     `;
 
-    document.documentElement.appendChild(panel);
+    controls = document.createElement("div");
+    controls.id = "controls";
+
+    controls.innerHTML = `
+      <button
+        id="play"
+        class="control-button"
+        type="button"
+        title="재생"
+      >
+        ▶
+      </button>
+
+      <button
+        id="pause"
+        class="control-button"
+        type="button"
+        title="일시정지"
+      >
+        Ⅱ
+      </button>
+
+      <button
+        id="stop"
+        class="control-button"
+        type="button"
+        title="정지 및 재설정"
+      >
+        ■
+      </button>
+    `;
+
+    regionBox = document.createElement("div");
+    regionBox.id = "region";
+
+    shadowRoot.append(
+      style,
+      regionBox,
+      panel,
+      controls
+    );
+
+    document.documentElement.appendChild(host);
+
+    statusElement =
+      panel.querySelector("#status");
 
     const timeInput =
-      panel.querySelector("#__watcher_schedule");
+      panel.querySelector("#schedule");
 
     const leadInput =
-      panel.querySelector("#__watcher_lead");
+      panel.querySelector("#lead");
 
     timeInput.value =
       state.scheduleTime || "";
@@ -702,6 +826,7 @@
         : "0";
 
     function updateTimeSettings(event) {
+      event.preventDefault();
       event.stopPropagation();
 
       state.scheduleTime =
@@ -712,10 +837,6 @@
         Number(leadInput.value || 0)
       );
 
-      /*
-       * 시간을 다시 변경하면 해당 예약을
-       * 다시 실행할 수 있게 키를 비웁니다.
-       */
       state.lastScheduleKey = "";
 
       saveState();
@@ -745,7 +866,7 @@
     );
 
     panel
-      .querySelector("#__watcher_clear_time")
+      .querySelector("#clear-time")
       .addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -768,7 +889,7 @@
       });
 
     panel
-      .querySelector("#__watcher_reload_now")
+      .querySelector("#reload-now")
       .addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -780,135 +901,8 @@
         }, 100);
       });
 
-    /*
-     * 패널에서 시작된 터치가 선택 이벤트로
-     * 전달되는 것을 방지합니다.
-     */
-    [
-      "touchstart",
-      "touchmove",
-      "touchend",
-      "pointerdown",
-      "pointerup",
-      "click"
-    ].forEach(type => {
-      panel.addEventListener(
-        type,
-        event => {
-          event.stopPropagation();
-        },
-        true
-      );
-    });
-
-    return panel;
-  }
-
-  function showStatus(message) {
-    const panel =
-      get(PANEL_ID) || createPanel();
-
-    const status =
-      panel.querySelector("#__watcher_status");
-
-    if (status) {
-      status.innerHTML = message;
-    }
-  }
-
-
-  // =========================================================
-  // 재생 / 일시정지 / 정지
-  // =========================================================
-
-  function createControls() {
-    let controls = get(CONTROLS_ID);
-
-    if (controls) {
-      return controls;
-    }
-
-    controls = document.createElement("div");
-    controls.id = CONTROLS_ID;
-
-    Object.assign(controls.style, {
-      position: "fixed",
-      zIndex: "2147483647",
-      right: "8px",
-      top: "42%",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-      padding: "6px",
-      background: "rgba(0,0,0,.80)",
-      borderRadius: "10px",
-      boxShadow: "0 2px 10px rgba(0,0,0,.35)",
-      WebkitUserSelect: "none",
-      userSelect: "none"
-    });
-
-    controls.innerHTML = `
-      <button
-        id="__watcher_play"
-        type="button"
-        title="재생"
-        style="
-          width:44px;
-          height:40px;
-          font-size:20px;
-        "
-      >
-        ▶
-      </button>
-
-      <button
-        id="__watcher_pause"
-        type="button"
-        title="일시정지"
-        style="
-          width:44px;
-          height:40px;
-          font-size:18px;
-        "
-      >
-        Ⅱ
-      </button>
-
-      <button
-        id="__watcher_stop"
-        type="button"
-        title="정지 및 재설정"
-        style="
-          width:44px;
-          height:40px;
-          font-size:20px;
-          color:red;
-        "
-      >
-        ■
-      </button>
-    `;
-
-    document.documentElement.appendChild(controls);
-
-    controls.addEventListener(
-      "touchstart",
-      event => {
-        event.stopPropagation();
-      },
-      true
-    );
-
-    controls.addEventListener(
-      "touchend",
-      event => {
-        event.stopPropagation();
-      },
-      true
-    );
-
     controls
-      .querySelector("#__watcher_play")
+      .querySelector("#play")
       .addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -923,18 +917,15 @@
         state.enabled = true;
         state.paused = false;
 
-        /*
-         * 재생 시 현재 화면을 새 기준으로 설정합니다.
-         */
         refreshBaseline();
         saveState();
 
         if (state.scheduleTime) {
           showStatus(
-            `예약 감시를 시작했습니다.<br>` +
+            "예약 감시를 시작했습니다.<br>" +
             `${escapeHtml(state.scheduleTime)}의 ` +
             `${escapeHtml(state.leadSeconds)}초 전에 ` +
-            `새로고침 후 두 번 터치합니다.`
+            "새로고침 후 두 번 터치합니다."
           );
         } else {
           showStatus(
@@ -945,7 +936,7 @@
       });
 
     controls
-      .querySelector("#__watcher_pause")
+      .querySelector("#pause")
       .addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -969,7 +960,7 @@
       });
 
     controls
-      .querySelector("#__watcher_stop")
+      .querySelector("#stop")
       .addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -980,47 +971,75 @@
         );
       });
 
-    return controls;
-  }
+    [
+      "touchstart",
+      "touchmove",
+      "touchend",
+      "touchcancel",
+      "pointerdown",
+      "pointerup",
+      "mousedown",
+      "mouseup",
+      "click",
+      "contextmenu"
+    ].forEach(type => {
+      panel.addEventListener(
+        type,
+        event => {
+          event.stopPropagation();
+        },
+        true
+      );
 
-
-  // =========================================================
-  // 선택 표시
-  // =========================================================
-
-  function createRegionBox() {
-    let box = get(REGION_ID);
-
-    if (box) {
-      return box;
-    }
-
-    box = document.createElement("div");
-    box.id = REGION_ID;
-
-    Object.assign(box.style, {
-      position: "fixed",
-      zIndex: "2147483646",
-      border: "3px solid #00ff66",
-      background: "rgba(0,255,100,.10)",
-      pointerEvents: "none",
-      display: "none",
-      boxSizing: "border-box"
+      controls.addEventListener(
+        type,
+        event => {
+          event.stopPropagation();
+        },
+        true
+      );
     });
 
-    document.documentElement.appendChild(box);
+    if (lastStatusMessage) {
+      statusElement.innerHTML =
+        lastStatusMessage;
+    }
 
-    return box;
+    restoreSelectionDisplay();
   }
 
-  function drawRegion(region, color = "#00ff66") {
+  function ensureInterface() {
+    if (
+      !host ||
+      !host.isConnected ||
+      !shadowRoot ||
+      !panel ||
+      !controls
+    ) {
+      createInterface();
+    }
+  }
+
+  function showStatus(message) {
+    lastStatusMessage = message;
+    ensureInterface();
+
+    if (statusElement) {
+      statusElement.innerHTML = message;
+    }
+  }
+
+  function drawRegion(
+    region,
+    color = "#00ff66"
+  ) {
     if (!region) {
       return;
     }
 
-    const box = createRegionBox();
+    ensureInterface();
 
-    Object.assign(box.style, {
+    Object.assign(regionBox.style, {
       display: "block",
       left: `${Math.round(region.left)}px`,
       top: `${Math.round(region.top)}px`,
@@ -1037,28 +1056,31 @@
   }
 
   function hideRegion() {
-    const box = get(REGION_ID);
-
-    if (box) {
-      box.style.display = "none";
+    if (regionBox) {
+      regionBox.style.display = "none";
     }
   }
 
   function clearOutline() {
     document
-      .querySelectorAll(
-        "[data-iphone-reload-outline]"
-      )
+      .querySelectorAll(`[${OUTLINE_ATTR}]`)
       .forEach(element => {
         element.style.outline =
-          element.dataset.oldIphoneOutline || "";
+          element.getAttribute(
+            "data-iphone-reload-old-outline-v6"
+          ) || "";
 
-        delete element.dataset.oldIphoneOutline;
-        delete element.dataset.iphoneReloadOutline;
+        element.removeAttribute(OUTLINE_ATTR);
+        element.removeAttribute(
+          "data-iphone-reload-old-outline-v6"
+        );
       });
   }
 
-  function outline(element, color = "#00ff66") {
+  function outline(
+    element,
+    color = "#00ff66"
+  ) {
     if (
       !element ||
       isOwnElement(element)
@@ -1066,22 +1088,27 @@
       return;
     }
 
-    if (!element.dataset.iphoneReloadOutline) {
-      element.dataset.oldIphoneOutline =
-        element.style.outline || "";
+    if (!element.hasAttribute(OUTLINE_ATTR)) {
+      element.setAttribute(
+        "data-iphone-reload-old-outline-v6",
+        element.style.outline || ""
+      );
 
-      element.dataset.iphoneReloadOutline = "1";
+      element.setAttribute(
+        OUTLINE_ATTR,
+        "1"
+      );
     }
 
     element.style.outline =
       `3px solid ${color}`;
   }
 
-  function normalizeRegion(a, b) {
-    const left = Math.min(a.x, b.x);
-    const top = Math.min(a.y, b.y);
-    const right = Math.max(a.x, b.x);
-    const bottom = Math.max(a.y, b.y);
+  function normalizeRegion(first, second) {
+    const left = Math.min(first.x, second.x);
+    const top = Math.min(first.y, second.y);
+    const right = Math.max(first.x, second.x);
+    const bottom = Math.max(first.y, second.y);
 
     return {
       left: Math.round(left),
@@ -1105,11 +1132,6 @@
       rect.top > region.top + region.height
     );
   }
-
-
-  // =========================================================
-  // 범위 내부 요소 수집
-  // =========================================================
 
   function collectRegionItems(region) {
     const result = {};
@@ -1146,9 +1168,15 @@
       const selector =
         makeSelector(target);
 
-      if (!selector || result[selector]) {
+      if (
+        !selector ||
+        result[selector]
+      ) {
         continue;
       }
+
+      const targetRect =
+        target.getBoundingClientRect();
 
       result[selector] = {
         selector,
@@ -1156,24 +1184,19 @@
         clickable: !!clickable,
         text: getText(target),
         code: getCode(target),
-
         centerX: Math.round(
-          rect.left + rect.width / 2
+          targetRect.left +
+          targetRect.width / 2
         ),
-
         centerY: Math.round(
-          rect.top + rect.height / 2
+          targetRect.top +
+          targetRect.height / 2
         )
       };
     }
 
     return result;
   }
-
-
-  // =========================================================
-  // 기준 상태 갱신
-  // =========================================================
 
   function refreshBaseline() {
     if (state.mode === "single") {
@@ -1195,11 +1218,6 @@
     saveState();
   }
 
-
-  // =========================================================
-  // 정지 및 초기화
-  // =========================================================
-
   function stopAfterAction(message) {
     state.enabled = false;
     state.paused = false;
@@ -1210,9 +1228,10 @@
 
     showStatus(
       `${message}<br>` +
-      `<b style="color:#00ff66">자동 동작 후 정지했습니다.</b><br>` +
-      `다시 실행하려면 ▶을 누르세요.<br>` +
-      `다시 지정하려면 ■을 누르세요.`
+      '<b style="color:#00ff66">' +
+      "자동 동작 후 정지했습니다.</b><br>" +
+      "다시 실행하려면 ▶을 누르세요.<br>" +
+      "다시 지정하려면 ■을 누르세요."
     );
   }
 
@@ -1221,6 +1240,7 @@
     state.paused = false;
 
     state.mode = null;
+
     state.selector = null;
     state.point = null;
     state.signature = null;
@@ -1242,12 +1262,7 @@
     );
   }
 
-
-  // =========================================================
-  // 합성 터치 및 클릭
-  // =========================================================
-
-  function dispatchPointerSequence(
+  function dispatchTouchSequence(
     element,
     x,
     y
@@ -1257,7 +1272,9 @@
     }
 
     try {
-      if (typeof PointerEvent === "function") {
+      if (
+        typeof PointerEvent === "function"
+      ) {
         element.dispatchEvent(
           new PointerEvent("pointerdown", {
             bubbles: true,
@@ -1313,25 +1330,22 @@
         })
       );
 
-      element.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          clientX: x,
-          clientY: y,
-          button: 0
-        })
-      );
-
-      /*
-       * 일반적인 링크·버튼 동작을 위해 click()도 실행합니다.
-       * 사이트에 따라 위 click 이벤트와 중복될 수 있으므로
-       * 기본 이벤트가 취소되지 않은 경우에만 별도로 실행하는
-       * 방식 대신 한 번의 click()을 최종 동작으로 사용합니다.
-       */
-      if (typeof element.click === "function") {
+      if (
+        typeof element.click === "function"
+      ) {
         element.click();
+      } else {
+        element.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: x,
+            clientY: y,
+            button: 0,
+            buttons: 0
+          })
+        );
       }
 
       return true;
@@ -1370,7 +1384,10 @@
     let element =
       document.elementFromPoint(x, y);
 
-    if (!element || isOwnElement(element)) {
+    if (
+      !element ||
+      isOwnElement(element)
+    ) {
       return null;
     }
 
@@ -1381,7 +1398,10 @@
     element,
     fallbackPoint = null
   ) {
-    if (!element || isOwnElement(element)) {
+    if (
+      !element ||
+      isOwnElement(element)
+    ) {
       return false;
     }
 
@@ -1392,7 +1412,7 @@
         inline: "center"
       });
     } catch (error) {
-      // 스크롤 실패는 무시
+      // 무시
     }
 
     await sleep(100);
@@ -1408,10 +1428,6 @@
       return false;
     }
 
-    /*
-     * 첫 번째 터치 전에 자동 정지 상태를 저장합니다.
-     * 첫 번째 터치로 페이지가 이동해도 재실행되지 않습니다.
-     */
     state.enabled = false;
     state.paused = false;
     state.pendingTouchAfterReload = false;
@@ -1420,7 +1436,7 @@
     saveState();
 
     const firstResult =
-      dispatchPointerSequence(
+      dispatchTouchSequence(
         element,
         center.x,
         center.y
@@ -1428,16 +1444,14 @@
 
     await sleep(DOUBLE_TOUCH_INTERVAL);
 
-    /*
-     * 첫 번째 동작으로 DOM이 바뀌었을 수 있으므로
-     * 같은 좌표에서 대상을 다시 찾습니다.
-     */
     const secondElement =
-      getTargetAtPoint(center.x, center.y) ||
-      element;
+      getTargetAtPoint(
+        center.x,
+        center.y
+      ) || element;
 
     const secondResult =
-      dispatchPointerSequence(
+      dispatchTouchSequence(
         secondElement,
         center.x,
         center.y
@@ -1472,10 +1486,11 @@
             y: state.point.y
           };
 
-          target = getTargetAtPoint(
-            point.x,
-            point.y
-          );
+          target =
+            getTargetAtPoint(
+              point.x,
+              point.y
+            );
         }
       }
 
@@ -1495,26 +1510,26 @@
           )
         };
 
-        target = getTargetAtPoint(
-          point.x,
-          point.y
-        );
+        target =
+          getTargetAtPoint(
+            point.x,
+            point.y
+          );
 
-        /*
-         * 범위 중앙에 클릭 가능한 요소가 없다면
-         * 범위 내부의 첫 클릭 가능 요소를 찾습니다.
-         */
         if (!findClickable(target)) {
           const items =
             collectRegionItems(state.region);
 
           const clickableItem =
-            Object.values(items)
-              .find(item => item.clickable);
+            Object.values(items).find(item => {
+              return item.clickable;
+            });
 
           if (clickableItem) {
             const found =
-              getElement(clickableItem.selector);
+              getElement(
+                clickableItem.selector
+              );
 
             if (found) {
               target =
@@ -1565,17 +1580,6 @@
     }
   }
 
-  function sleep(milliseconds) {
-    return new Promise(resolve => {
-      setTimeout(resolve, milliseconds);
-    });
-  }
-
-
-  // =========================================================
-  // 단일 포인트 변화 감시
-  // =========================================================
-
   async function monitorSingle() {
     const element =
       getElement(state.selector);
@@ -1600,12 +1604,13 @@
       outline(element, "#ff3333");
 
       showStatus(
-        `포인트 변화 감지<br>` +
+        "포인트 변화 감지<br>" +
         `코드: ${escapeHtml(getCode(element))}<br>` +
         `내용: ${escapeHtml(
           getText(element) || "내용 없음"
         )}<br>` +
-        `<b style="color:#ffeb3b">두 번 터치합니다.</b>`
+        '<b style="color:#ffeb3b">' +
+        "두 번 터치합니다.</b>"
       );
 
       await doubleTouchSelectedArea(element);
@@ -1617,11 +1622,6 @@
 
     saveState();
   }
-
-
-  // =========================================================
-  // 범위 변화 감시
-  // =========================================================
 
   async function monitorRegion() {
     if (!state.region) {
@@ -1692,7 +1692,8 @@
         `내용: ${escapeHtml(
           changedItem.text || "내용 없음"
         )}<br>` +
-        `<b style="color:#ffeb3b">변화 부위를 두 번 터치합니다.</b>`
+        '<b style="color:#ffeb3b">' +
+        "변화 부위를 두 번 터치합니다.</b>"
       );
 
       await doubleTouchSelectedArea(
@@ -1702,16 +1703,9 @@
       return;
     }
 
-    state.regionItems =
-      currentItems;
-
+    state.regionItems = currentItems;
     saveState();
   }
-
-
-  // =========================================================
-  // 시간 처리
-  // =========================================================
 
   function parseTime(value) {
     if (!value) {
@@ -1751,8 +1745,7 @@
   }
 
   function localDateKey(date) {
-    const year =
-      date.getFullYear();
+    const year = date.getFullYear();
 
     const month =
       String(date.getMonth() + 1)
@@ -1793,10 +1786,6 @@
       target.getTime() -
       leadMilliseconds;
 
-    /*
-     * 오늘 예약 시간이 이미 충분히 지났으면
-     * 다음 날 예약으로 계산합니다.
-     */
     if (
       Date.now() >
       reloadAt + 2000
@@ -1863,7 +1852,8 @@
       showStatus(
         `${escapeHtml(state.scheduleTime)} 예약<br>` +
         `${escapeHtml(state.leadSeconds)}초 전입니다.<br>` +
-        `<b style="color:#ffeb3b">새로고침 후 두 번 터치합니다.</b>`
+        '<b style="color:#ffeb3b">' +
+        "새로고침 후 두 번 터치합니다.</b>"
       );
 
       setTimeout(() => {
@@ -1871,11 +1861,6 @@
       }, 120);
     }
   }
-
-
-  // =========================================================
-  // 포인트/범위 선택
-  // =========================================================
 
   function selectSingle(element) {
     if (
@@ -1938,12 +1923,12 @@
     saveState();
 
     showStatus(
-      `포인트가 지정되었습니다.<br>` +
+      "포인트가 지정되었습니다.<br>" +
       `코드: ${escapeHtml(getCode(target))}<br>` +
       `내용: ${escapeHtml(
         getText(target) || "내용 없음"
       )}<br>` +
-      `오른쪽 ▶ 버튼을 누르세요.`
+      "오른쪽 ▶ 버튼을 누르세요."
     );
   }
 
@@ -1987,18 +1972,46 @@
     saveState();
 
     showStatus(
-      `범위가 지정되었습니다.<br>` +
+      "범위가 지정되었습니다.<br>" +
       `항목 ${Object.keys(
         state.regionItems
       ).length}개를 확인했습니다.<br>` +
-      `오른쪽 ▶ 버튼을 누르세요.`
+      "오른쪽 ▶ 버튼을 누르세요."
     );
   }
 
+  function restoreSelectionDisplay() {
+    clearOutline();
 
-  // =========================================================
-  // 터치 선택 이벤트
-  // =========================================================
+    if (
+      state.mode === "region" &&
+      state.region
+    ) {
+      drawRegion(
+        state.region,
+        "#00ff66"
+      );
+
+      return;
+    }
+
+    hideRegion();
+
+    if (
+      state.mode === "single" &&
+      state.selector
+    ) {
+      const element =
+        getElement(state.selector);
+
+      if (element) {
+        outline(
+          element,
+          "#00ff66"
+        );
+      }
+    }
+  }
 
   let startPoint = null;
   let lastPoint = null;
@@ -2032,13 +2045,17 @@
     event => {
       if (
         event.touches.length !== 1 ||
-        actionInProgress
+        actionInProgress ||
+        isOwnElement(event.target, event)
       ) {
         return;
       }
 
-      const touch =
-        event.touches[0];
+      if (state.mode !== null) {
+        return;
+      }
+
+      const touch = event.touches[0];
 
       const element =
         document.elementFromPoint(
@@ -2050,15 +2067,6 @@
         !element ||
         isOwnElement(element)
       ) {
-        return;
-      }
-
-      /*
-       * 중요:
-       * 포인트/범위가 이미 지정된 이후에는
-       * 일반 페이지 터치를 가로채지 않습니다.
-       */
-      if (state.mode !== null) {
         return;
       }
 
@@ -2143,10 +2151,10 @@
         );
 
         showStatus(
-          `범위 지정 중<br>` +
+          "범위 지정 중<br>" +
           `너비: ${region.width}px / ` +
           `높이: ${region.height}px<br>` +
-          `원하는 위치에서 손을 떼세요.`
+          "원하는 위치에서 손을 떼세요."
         );
       }
     },
@@ -2160,6 +2168,13 @@
     "touchend",
     event => {
       if (!startPoint) {
+        return;
+      }
+
+      if (
+        isOwnElement(event.target, event)
+      ) {
+        clearSelectionGesture();
         return;
       }
 
@@ -2245,16 +2260,12 @@
     }
   );
 
-  /*
-   * 길게 누를 때 Safari 기본 메뉴가 나타나는 것을 방지합니다.
-   * 단, 도구 패널 내부에서는 기본 동작을 유지합니다.
-   */
   document.addEventListener(
     "contextmenu",
     event => {
       if (
         state.mode === null &&
-        !isOwnElement(event.target)
+        !isOwnElement(event.target, event)
       ) {
         event.preventDefault();
       }
@@ -2264,44 +2275,7 @@
     }
   );
 
-
-  // =========================================================
-  // 초기 화면 복원
-  // =========================================================
-
-  createPanel();
-  createControls();
-  createRegionBox();
-
-  if (
-    state.mode === "region" &&
-    state.region
-  ) {
-    drawRegion(
-      state.region,
-      "#00ff66"
-    );
-  }
-
-  if (
-    state.mode === "single" &&
-    state.selector
-  ) {
-    const restored =
-      getElement(state.selector);
-
-    if (restored) {
-      outline(
-        restored,
-        "#00ff66"
-      );
-    }
-  }
-
-
-  // =========================================================
-  // 예약 새로고침 직후 자동 더블 터치
-  // =========================================================
+  createInterface();
 
   if (
     state.pendingTouchAfterReload &&
@@ -2309,32 +2283,24 @@
   ) {
     showStatus(
       "예약 새로고침이 완료되었습니다.<br>" +
-      `<b style="color:#ffeb3b">선택 부위를 두 번 터치합니다.</b>`
+      '<b style="color:#ffeb3b">' +
+      "선택 부위를 두 번 터치합니다.</b>"
     );
 
     setTimeout(async () => {
       await doubleTouchSelectedArea();
     }, POST_RELOAD_DELAY);
-
-    return;
-  }
-
-
-  // =========================================================
-  // 초기 상태 안내
-  // =========================================================
-
-  if (
+  } else if (
     state.enabled &&
     !state.paused &&
     state.mode
   ) {
     if (state.scheduleTime) {
       showStatus(
-        `예약 감시가 복원되었습니다.<br>` +
+        "예약 감시가 복원되었습니다.<br>" +
         `시간: ${escapeHtml(state.scheduleTime)}<br>` +
         `${escapeHtml(state.leadSeconds)}초 전에 ` +
-        `새로고침 후 두 번 터치합니다.`
+        "새로고침 후 두 번 터치합니다."
       );
     } else {
       showStatus(
@@ -2362,12 +2328,34 @@
     );
   }
 
+  setInterval(() => {
+    ensureInterface();
+  }, 500);
 
-  // =========================================================
-  // 감시 루프
-  // =========================================================
+  setInterval(() => {
+    if (location.href !== lastKnownUrl) {
+      lastKnownUrl = location.href;
+      initializedAt = Date.now();
+      lastCheckTime = 0;
+
+      setTimeout(() => {
+        ensureInterface();
+        restoreSelectionDisplay();
+
+        if (
+          state.enabled &&
+          !state.paused &&
+          state.mode
+        ) {
+          refreshBaseline();
+        }
+      }, 300);
+    }
+  }, 250);
 
   setInterval(async () => {
+    ensureInterface();
+
     if (
       actionInProgress ||
       !state.enabled ||
@@ -2379,10 +2367,6 @@
 
     const now = Date.now();
 
-    /*
-     * 시간 설정이 있으면 예약 동작만 수행합니다.
-     * 변화 감시는 실행하지 않습니다.
-     */
     if (state.scheduleTime) {
       if (
         now - lastCheckTime <
@@ -2396,9 +2380,6 @@
       return;
     }
 
-    /*
-     * 시간이 없으면 변화 감지 모드입니다.
-     */
     if (
       now - lastCheckTime <
       NORMAL_CHECK_INTERVAL
@@ -2408,10 +2389,6 @@
 
     lastCheckTime = now;
 
-    /*
-     * 페이지 로드 직후 변화를 잘못 감지하지 않도록
-     * 잠시 기다린 뒤 기준 상태를 한 번 갱신합니다.
-     */
     if (
       now - initializedAt <
       INITIAL_STABILIZE_TIME
