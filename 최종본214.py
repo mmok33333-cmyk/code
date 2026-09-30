@@ -1,5 +1,15 @@
 ﻿# -*- coding: utf-8 -*-
 # ================================================================
+# 최종본214 변경사항
+# - 전기공종 정액적산대가산출표 값 갱신 후 소계 연하늘색 유지
+# - 전기공종 정액적산대가산출표 값 갱신 후 합계 연회색 유지
+# - 전기공종 실비정액대가산출표 값 갱신 후 소계 연하늘색 유지
+# - 전기공종 실비정액대가산출표 값 갱신 후 합계 연회색 유지
+# - Entry의 일반·읽기전용·비활성 배경색을 함께 고정
+# ================================================================
+
+# -*- coding: utf-8 -*-
+# ================================================================
 # 최종본213 변경사항
 # - 전기공종 최소 등급기준 표시 문구 수정
 # - 상주(책임) 등급 뒤 괄호 법령 내용 제거
@@ -51246,53 +51256,82 @@ def _v89_set_entries_active(
             pass
 
 
-def _v89_restore_electric_summary_colors(namespace, project_index):
-    """전기 대가산출표 소계·합계 셀의 고정 음영을 복원합니다."""
-    subtotal_color = "#d9e2f3"
-    total_color = "#d9d9d9"
+# 최종본214: 계산값 갱신 시에도 소계·합계 음영을 고정합니다.
+_V214_SUBTOTAL_BACKGROUND = "#d9e2f3"
+_V214_TOTAL_BACKGROUND = "#d9d9d9"
+
+
+def _v214_set_entry_background(widget, color):
+    if widget is None:
+        return
+
+    try:
+        widget.configure(
+            bg=color,
+            readonlybackground=color,
+            disabledbackground=color,
+        )
+    except Exception:
+        try:
+            widget.configure(
+                readonlybackground=color,
+                disabledbackground=color,
+            )
+        except Exception:
+            pass
+
+
+def _v214_apply_electric_cost_summary_colors(
+    namespace,
+    project_index=None,
+):
+    """전기 정액적산·실비정액 표의 소계와 합계 음영을 복원합니다."""
+    if namespace.get("_v89_trade_name") != "전기":
+        return
+
+    if project_index is None:
+        project_indices = range(
+            len(namespace.get("entry_area", []))
+        )
+    else:
+        project_indices = (project_index,)
+
     summary_specs = (
-        ("cost_entries_100", ((24, total_color),)),
+        (
+            "cost_entries_100",
+            ((24, _V214_TOTAL_BACKGROUND),),
+        ),
         (
             "cost_entries_split",
             (
-                (24, subtotal_color),
-                (43, subtotal_color),
-                (44, total_color),
+                (24, _V214_SUBTOTAL_BACKGROUND),
+                (43, _V214_SUBTOTAL_BACKGROUND),
+                (44, _V214_TOTAL_BACKGROUND),
             ),
         ),
         (
             "cost_entries_actual_split",
             (
-                (24, subtotal_color),
-                (43, subtotal_color),
-                (44, total_color),
+                (24, _V214_SUBTOTAL_BACKGROUND),
+                (43, _V214_SUBTOTAL_BACKGROUND),
+                (44, _V214_TOTAL_BACKGROUND),
             ),
         ),
     )
 
-    for collection_name, color_specs in summary_specs:
-        entries = _v89_list_item(
-            namespace.get(collection_name, []),
-            project_index,
-        )
+    for index in project_indices:
+        for collection_name, color_specs in summary_specs:
+            entries = _v89_list_item(
+                namespace.get(collection_name, []),
+                index,
+            )
 
-        if not isinstance(entries, (list, tuple)):
-            continue
-
-        for entry_index, color in color_specs:
-            entry = _v89_list_item(entries, entry_index)
-
-            if entry is None:
+            if not isinstance(entries, (list, tuple)):
                 continue
 
-            try:
-                entry.configure(
-                    background=color,
-                    readonlybackground=color,
-                    disabledbackground=color,
-                )
-            except Exception:
-                pass
+            for entry_index, color in color_specs:
+                entry = _v89_list_item(entries, entry_index)
+                _v214_set_entry_background(entry, color)
 
 
 def _v89_apply_electric_area_mode(namespace, project_index):
@@ -51403,9 +51442,8 @@ def _v89_apply_electric_area_mode(namespace, project_index):
     except Exception:
         pass
 
-    # 활성/비활성 표의 일반 셀 색상을 적용한 뒤 소계·합계 음영을
-    # 마지막에 복원해야 계산 결과가 입력되어도 흰색으로 바뀌지 않는다.
-    _v89_restore_electric_summary_colors(
+    # 활성 표의 값이 생겨도 요약 행의 고유 음영을 마지막에 다시 적용합니다.
+    _v214_apply_electric_cost_summary_colors(
         namespace,
         project_index,
     )
